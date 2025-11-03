@@ -8,7 +8,8 @@ const Check = (p) => <span {...p}>✔</span>;
 const DB = (p) => <span {...p}>🗄️</span>;
 
 // ---- API: change this to match your IIS host/route ----
-const API_URL = "https://generate-sql.local/generate_sql"; // or http:// if you didn't set HTTPS
+ const API_URL = "https://generate-sql.local/generate_sql"; // or http:// if you didn't set HTTPS
+//const API_URL = "http://localhost:9000/generate_sql";
 
 async function callGenerateSqlAPI(question) {
   const payload = {
