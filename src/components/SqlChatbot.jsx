@@ -17,8 +17,11 @@ const Trash = (p) => <span {...p}>🗑️</span>;
    cluster -> /generate_sql_premium
 ---------------------------------------------------------------- */
 const ENDPOINTS = {
-  keyword: "http://localhost:9001/generate_sql",
-  cluster: "http://localhost:9001/generate_sql_premium",
+  // keyword: "http://localhost:9001/generate_sql",
+  // cluster: "http://localhost:9001/generate_sql_premium",
+
+  keyword: "https://generate-sql.local/generate_sql",
+  cluster: "https://generate-sql.local/generate_sql_premium",
 };
 
 /* ---------------- Pipelines dropdown ---------------- */
