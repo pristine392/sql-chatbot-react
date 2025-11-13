@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
-// --- Emoji icons (no extra libs) ---
+/* ---------------- Emoji icons (no extra libs) ---------------- */
 const Loader = (p) => <span {...p}>⏳</span>;
 const Send = (p) => <span {...p}>➤</span>;
 const CopyI = (p) => <span {...p}>📋</span>;
@@ -11,29 +11,40 @@ const Menu = (p) => <span {...p}>☰</span>;
 const Plus = (p) => <span {...p}>＋</span>;
 const Trash = (p) => <span {...p}>🗑️</span>;
 
-// ---- API endpoints (map by model) ----
+/* ---------------- API endpoints (by pipeline) ----------------
+   NOTE: Keep ports consistent with your server.
+   keyword -> /generate_sql
+   cluster -> /generate_sql_premium
+---------------------------------------------------------------- */
 const ENDPOINTS = {
-  // Basic
-  // keyword: "http://localhost:9000/generate_sql",
-  keyword: "https://generate-sql.local/generate_sql",
-  // Premium
-  cluster: "https://generate-sql.local/generate_sql_premium",
+  keyword: "http://localhost:9001/generate_sql",
+  cluster: "http://localhost:9001/generate_sql_premium",
 };
 
-const MODELS = [
+/* ---------------- Pipelines dropdown ---------------- */
+const PIPELINES = [
   { id: "keyword", label: "Basic" },
   { id: "cluster", label: "Premium" },
 ];
 
-async function callGenerateSqlAPI(question, modelId) {
-  const apiUrl = ENDPOINTS[modelId] || ENDPOINTS.keyword;
+/* ---------------- API call ----------------
+   CHANGES:
+   - Send `mode` (pipeline) in payload.
+   - Do NOT send `model: "keyword"`.
+   - Nice error surfacing for server {detail: "..."}.
+-------------------------------------------- */
+async function callGenerateSqlAPI(question, pipelineId) {
+  const apiUrl = ENDPOINTS[pipelineId] || ENDPOINTS.keyword;
 
   const payload = {
     question,
-    schema_path: "schema_tree.json",
+    mode: pipelineId,                 // <-- critical fix
+    schema_path: "schema_tree.json",  // keep if your backend uses these
     keywords_path: "keyword_to_tables.json",
     dialect: "mysql",
-    model: modelId || "gpt-5",
+
+    // If you later add a real LLM selector, send it as `openai_model`, e.g.:
+    // openai_model: "gpt-4o-mini",
   };
 
   const res = await fetch(apiUrl, {
@@ -41,15 +52,30 @@ async function callGenerateSqlAPI(question, modelId) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error(await res.text());
-  const data = await res.json();
+
+  let bodyText = "";
+  try { bodyText = await res.text(); } catch {}
+
+  if (!res.ok) {
+    // Try to extract a concise server error (FastAPI detail)
+    try {
+      const j = JSON.parse(bodyText);
+      throw new Error(j.detail || j.message || bodyText || `HTTP ${res.status}`);
+    } catch {
+      throw new Error(bodyText || `HTTP ${res.status}`);
+    }
+  }
+
+  let data = {};
+  try { data = JSON.parse(bodyText); } catch { data = {}; }
+
   return {
     sql: data.sql ?? "",
     explanation: data.explanation ?? "",
   };
 }
 
-// ---------------- UI PRIMITIVES ----------------
+/* ---------------- UI primitives ---------------- */
 const Button = ({ className = "", children, ...rest }) => (
   <button className={`gp-btn ${className}`} {...rest}>
     {children}
@@ -117,7 +143,6 @@ function AssistantAnswer({ sql, explanation, error }) {
           {indentSql(sql)}
         </CodeBlock>
       )}
-
       {explanation && (
         <TextCard title="Explanation">
           <div className="gp-expl">{explanation}</div>
@@ -127,7 +152,7 @@ function AssistantAnswer({ sql, explanation, error }) {
   );
 }
 
-// ---------------- MAIN COMPONENT ----------------
+/* ---------------- Main component ---------------- */
 export default function SqlChatbot() {
   const [messages, setMessages] = useState([
     {
@@ -141,7 +166,7 @@ export default function SqlChatbot() {
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [model, setModel] = useState(MODELS[0].id);
+  const [pipeline, setPipeline] = useState(PIPELINES[0].id); // "keyword" | "cluster"
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const viewportRef = useRef(null);
@@ -189,13 +214,13 @@ export default function SqlChatbot() {
     setLoading(true);
 
     try {
-      const { sql, explanation } = await callGenerateSqlAPI(question, model);
+      const { sql, explanation } = await callGenerateSqlAPI(question, pipeline);
       setMessages((m) => [
         ...m,
         {
           id: crypto.randomUUID(),
           role: "assistant",
-          text: `Here is a suggested SQL query using ${model}.`,
+          text: `Here is a suggested SQL query using the "${pipeline}" pipeline.`,
           sql,
           explanation,
           createdAt: Date.now(),
@@ -244,13 +269,18 @@ export default function SqlChatbot() {
           </div>
 
           <div className="gp-side-sec">
-            <div className="gp-sec-title">Model</div>
+            <div className="gp-sec-title">Pipeline</div>
             <div className="gp-field">
-              <label htmlFor="model" className="gp-label">LLM</label>
-              <select id="model" value={model} onChange={(e)=>setModel(e.target.value)} className="gp-select">
-                {MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+              <label htmlFor="pipeline" className="gp-label">Generation</label>
+              <select
+                id="pipeline"
+                value={pipeline}
+                onChange={(e)=>setPipeline(e.target.value)}
+                className="gp-select"
+              >
+                {PIPELINES.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
               </select>
-              <div className="gp-help">This only changes the *generation* model for SQL/explanations.</div>
+              <div className="gp-help">Choose the SQL-generation pipeline ("Basic" or "Premium").</div>
             </div>
           </div>
 
@@ -272,7 +302,7 @@ export default function SqlChatbot() {
             <div className="gp-logo"><DB /></div>
             <div className="gp-title">
               <div className="gp-title-main">SQL Chatbot</div>
-              <div className="gp-title-sub">{`Ask anything • ${model}`}</div>
+              <div className="gp-title-sub">{`Ask anything • ${pipeline}`}</div>
             </div>
           </div>
         </header>
@@ -329,13 +359,13 @@ export default function SqlChatbot() {
       <style>{`
         :root{
           --bg:#f6f7f9;           /* page background */
-          --panel:#fff;            /* cards & composer */
-          --muted:#64748b;         /* secondary text */
-          --line:#e5e7eb;          /* borders */
-          --ink:#0f172a;           /* primary text */
-          --ink-inv:#fff;          /* on dark */
-          --bubble-user:#0f172a;   /* user bubble */
-          --bubble-assist:#f1f5f9; /* assistant bubble */
+          --panel:#fff;           /* cards & composer */
+          --muted:#64748b;        /* secondary text */
+          --line:#e5e7eb;         /* borders */
+          --ink:#0f172a;          /* primary text */
+          --ink-inv:#fff;         /* on dark */
+          --bubble-user:#0f172a;  /* user bubble */
+          --bubble-assist:#f1f5f9;/* assistant bubble */
         }
         *{box-sizing:border-box}
         html,body,#root{height:100%}
