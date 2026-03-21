@@ -1,567 +1,451 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
+/* ---------------- Emoji icons (no extra libs) ---------------- */
+const Loader = (p) => <span {...p}>⏳</span>;
+const Send = (p) => <span {...p}>➤</span>;
+const CopyI = (p) => <span {...p}>📋</span>;
+const Check = (p) => <span {...p}>✔</span>;
+const DB = (p) => <span {...p}>🗄️</span>;
+const User = (p) => <span {...p}>🧑‍💻</span>;
+const Menu = (p) => <span {...p}>☰</span>;
+const Plus = (p) => <span {...p}>＋</span>;
+const Trash = (p) => <span {...p}>🗑️</span>;
+
+/* ---------------- API endpoints (by pipeline) ----------------
+   NOTE: Keep ports consistent with your server.
+   keyword -> /generate_sql
+   cluster -> /generate_sql_premium
+---------------------------------------------------------------- */
 const ENDPOINTS = {
-  keyword: "https://sql-chatbot-pythonapi.vercel.app/api/generate_sql",
-  cluster: "https://sql-chatbot-pythonapi.vercel.app/api/generate_sql_premium",
+  // keyword: "http://localhost:9001/generate_sql",
+  // cluster: "http://localhost:9001/generate_sql_premium",
+
+  keyword: "https://generate-sql.local/generate_sql",
+  cluster: "https://generate-sql.local/generate_sql_premium",
 };
+
+/* ---------------- Pipelines dropdown ---------------- */
 const PIPELINES = [
   { id: "keyword", label: "Basic" },
   { id: "cluster", label: "Premium" },
 ];
 
+/* ---------------- API call ----------------
+   CHANGES:
+   - Send `mode` (pipeline) in payload.
+   - Do NOT send `model: "keyword"`.
+   - Nice error surfacing for server {detail: "..."}.
+-------------------------------------------- */
 async function callGenerateSqlAPI(question, pipelineId) {
   const apiUrl = ENDPOINTS[pipelineId] || ENDPOINTS.keyword;
-  const payload = { question, mode: pipelineId, schema_path: "schema_tree.json", keywords_path: "keyword_to_tables.json", dialect: "mysql" };
-  const res = await fetch(apiUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+
+  const payload = {
+    question,
+    mode: pipelineId,                 // <-- critical fix
+    schema_path: "schema_tree.json",  // keep if your backend uses these
+    keywords_path: "keyword_to_tables.json",
+    dialect: "mysql",
+
+    // If you later add a real LLM selector, send it as `openai_model`, e.g.:
+    // openai_model: "gpt-4o-mini",
+  };
+
+  const res = await fetch(apiUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
   let bodyText = "";
   try { bodyText = await res.text(); } catch {}
+
   if (!res.ok) {
-    try { const j = JSON.parse(bodyText); throw new Error(j.detail || j.message || bodyText || `HTTP ${res.status}`); }
-    catch { throw new Error(bodyText || `HTTP ${res.status}`); }
+    // Try to extract a concise server error (FastAPI detail)
+    try {
+      const j = JSON.parse(bodyText);
+      throw new Error(j.detail || j.message || bodyText || `HTTP ${res.status}`);
+    } catch {
+      throw new Error(bodyText || `HTTP ${res.status}`);
+    }
   }
+
   let data = {};
   try { data = JSON.parse(bodyText); } catch { data = {}; }
-  return { sql: data.sql ?? "", explanation: data.explanation ?? "" };
+
+  return {
+    sql: data.sql ?? "",
+    explanation: data.explanation ?? "",
+  };
 }
 
-/* ── Icons ── */
-const MenuIcon = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-    <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="15" y2="12"/><line x1="3" y1="18" x2="19" y2="18"/>
-  </svg>
-);
-const PlusIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-    <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-  </svg>
-);
-const DBIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-    <ellipse cx="12" cy="5" rx="9" ry="3"/>
-    <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
-    <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
-  </svg>
-);
-const SendIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-    <line x1="22" y1="2" x2="11" y2="13"/>
-    <polygon points="22 2 15 22 11 13 2 9 22 2"/>
-  </svg>
-);
-const CheckIcon = () => (
-  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-    <polyline points="20 6 9 17 4 12"/>
-  </svg>
-);
-const CopyIcon = () => (
-  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-    <rect x="9" y="9" width="13" height="13" rx="2"/>
-    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-  </svg>
-);
-const CodeIcon = () => (
-  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-    <polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>
-  </svg>
-);
-const InfoIcon = () => (
-  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-    <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
-  </svg>
-);
-const TrashIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-    <polyline points="3 6 5 6 21 6"/>
-    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6M9 6V4h6v2"/>
-  </svg>
-);
-const ChevronIcon = () => (
-  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-    <polyline points="9 18 15 12 9 6"/>
-  </svg>
-);
-const UserIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
-  </svg>
-);
-const AlertIcon = () => (
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-    <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-  </svg>
-);
-const SpinIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"
-    style={{ animation: "spin .8s linear infinite", display: "block" }}>
-    <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
-  </svg>
+/* ---------------- UI primitives ---------------- */
+const Button = ({ className = "", children, ...rest }) => (
+  <button className={`gp-btn ${className}`} {...rest}>
+    {children}
+  </button>
 );
 
-/* ── Copy Button ── */
-function CopyButton({ value = "" }) {
+const IconButton = ({ children, ...rest }) => (
+  <button className="gp-icon-btn" {...rest}>
+    {children}
+  </button>
+);
+
+const CopyButton = ({ value = "" }) => {
   const [ok, setOk] = useState(false);
   return (
-    <button
-      style={{
-        display: "inline-flex", alignItems: "center", gap: 5,
-        fontFamily: "inherit", fontSize: 11, fontWeight: 600,
-        padding: "4px 11px", borderRadius: 7,
-        border: ok ? "1px solid #059669" : "1px solid #d1d5db",
-        background: ok ? "#ecfdf5" : "#f9fafb",
-        color: ok ? "#059669" : "#6b7280",
-        cursor: "pointer", transition: "all .15s",
-      }}
-      onMouseEnter={e => { if (!ok) { e.currentTarget.style.background = "#f3f4f6"; e.currentTarget.style.color = "#374151"; } }}
-      onMouseLeave={e => { if (!ok) { e.currentTarget.style.background = "#f9fafb"; e.currentTarget.style.color = "#6b7280"; } }}
+    <Button
       onClick={async () => {
-        try { await navigator.clipboard.writeText(value); setOk(true); setTimeout(() => setOk(false), 1400); } catch {}
+        try {
+          await navigator.clipboard.writeText(value);
+          setOk(true);
+          setTimeout(() => setOk(false), 1100);
+        } catch {}
       }}
     >
-      {ok ? <><CheckIcon /> Copied!</> : <><CopyIcon /> Copy SQL</>}
-    </button>
+      {ok ? <Check /> : <CopyI />} {ok ? "Copied" : "Copy"}
+    </Button>
+  );
+};
+
+function CodeBlock({ title, children, onCopy }) {
+  return (
+    <div className="gp-card gp-code">
+      <div className="gp-card-h">
+        <span>{title}</span>
+        {onCopy}
+      </div>
+      <pre className="gp-pre"><code>{children}</code></pre>
+    </div>
   );
 }
 
-/* ── Assistant Answer ── */
-function AssistantAnswer({ sql, explanation, error }) {
-  if (error) return (
-    <div style={{ display: "flex", alignItems: "flex-start", gap: 9, marginTop: 10, padding: "10px 14px", borderRadius: 10, border: "1px solid #fecaca", background: "#fff1f2", color: "#dc2626", fontSize: 13 }}>
-      <AlertIcon /><span>{explanation || "Something went wrong."}</span>
+function TextCard({ title, children }) {
+  return (
+    <div className="gp-card">
+      <div className="gp-card-h"><span>{title}</span></div>
+      <div className="gp-card-b">{children}</div>
     </div>
   );
+}
+
+function AssistantAnswer({ sql, explanation, error }) {
+  if (error) return <div className="gp-error">{explanation || "Something went wrong."}</div>;
   if (!sql && !explanation) return null;
+
+  const indentSql = (s) =>
+    s
+      .split("\n")
+      .map((ln) => (ln.trim() ? "  " + ln : ln))
+      .join("\n");
+
   return (
-    <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+    <div className="gp-assistant-details">
       {sql && (
-        <div style={{ borderRadius: 12, overflow: "hidden", border: "1px solid #e5e7eb", background: "#0f172a" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "9px 14px", background: "#1e293b", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
-            <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, letterSpacing: ".07em", textTransform: "uppercase", color: "#34d399" }}>
-              <CodeIcon /> SQL Query
-            </span>
-            <CopyButton value={sql} />
-          </div>
-          <pre style={{ margin: 0, padding: "16px 18px", fontFamily: "'JetBrains Mono', 'Fira Code', monospace", fontSize: 13, lineHeight: 1.8, color: "#86efac", overflowX: "auto", whiteSpace: "pre" }}>
-            <code>{sql}</code>
-          </pre>
-        </div>
+        <CodeBlock title="Proposed SQL" onCopy={<CopyButton value={sql} />}>
+          {indentSql(sql)}
+        </CodeBlock>
       )}
       {explanation && (
-        <div style={{ background: "#f8faff", border: "1px solid #dbeafe", borderRadius: 12, padding: "13px 16px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, letterSpacing: ".07em", textTransform: "uppercase", color: "#3b82f6", marginBottom: 8 }}>
-            <InfoIcon /> Explanation
-          </div>
-          <p style={{ fontSize: 13, lineHeight: 1.72, color: "#374151", whiteSpace: "pre-wrap", margin: 0 }}>{explanation}</p>
-        </div>
+        <TextCard title="Explanation">
+          <div className="gp-expl">{explanation}</div>
+        </TextCard>
       )}
     </div>
   );
 }
 
-/* ── Typing Dots ── */
-function TypingDots() {
+/* ---------------- Main component ---------------- */
+export default function SqlChatbot() {
+  const [messages, setMessages] = useState([
+    {
+      id: "seed",
+      role: "assistant",
+      text: "Hi! Ask me a data question. I'll propose a MySQL query and explain it.",
+      explanation:
+        "Example: 'Total production by provider for September 2025' or 'New patients scheduled on 2025-10-13'.",
+      createdAt: Date.now(),
+    },
+  ]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [pipeline, setPipeline] = useState(PIPELINES[0].id); // "keyword" | "cluster"
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [showScrollBtn, setShowScrollBtn] = useState(false);
+  const viewportRef = useRef(null);
+  const inputRef = useRef(null);
+
+  // Auto-scroll to bottom on new messages (if user near bottom)
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    if (atBottom) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  }, [messages, loading]);
+
+  // Show "scroll to bottom" button
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+      setShowScrollBtn(!nearBottom);
+    };
+    el.addEventListener("scroll", onScroll);
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
+
+  const scrollToBottom = () => {
+    viewportRef.current?.scrollTo({ top: viewportRef.current.scrollHeight, behavior: "smooth" });
+  };
+
+  // Submit on Enter (Shift+Enter for newline)
+  function onKeyDown(e) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleAsk();
+    }
+  }
+
+  async function handleAsk(e) {
+    e?.preventDefault();
+    const question = input.trim();
+    if (!question || loading) return;
+
+    setMessages((m) => [...m, { id: crypto.randomUUID(), role: "user", text: question, createdAt: Date.now() }]);
+    setInput("");
+    setLoading(true);
+
+    try {
+      const { sql, explanation } = await callGenerateSqlAPI(question, pipeline);
+      setMessages((m) => [
+        ...m,
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          text: `Here is a suggested SQL query using the "${pipeline}" pipeline.`,
+          sql,
+          explanation,
+          createdAt: Date.now(),
+        },
+      ]);
+    } catch (err) {
+      setMessages((m) => [
+        ...m,
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          text: "Sorry, I couldn't generate a query.",
+          explanation: String(err?.message || err),
+          createdAt: Date.now(),
+          error: "true",
+        },
+      ]);
+    } finally {
+      setLoading(false);
+      inputRef.current?.focus();
+    }
+  }
+
+  function handleNewChat() {
+    setMessages([
+      {
+        id: "seed",
+        role: "assistant",
+        text: "Hi! Ask me a data question. I'll propose a MySQL query and explain it.",
+        explanation:
+          "Example: 'Total production by provider for September 2025' or 'New patients scheduled on 2025-10-13'.",
+        createdAt: Date.now(),
+      },
+    ]);
+    setInput("");
+    scrollToBottom();
+  }
+
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-      <div style={{ width: 34, height: 34, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(135deg,#eff6ff,#dbeafe)", border: "1px solid #bfdbfe", color: "#3b82f6", flexShrink: 0 }}>
-        <DBIcon />
+    <div className={`gp-shell ${sidebarOpen ? "with-side" : ""}`}>
+      {/* Sidebar */}
+      <aside className={`gp-side ${sidebarOpen ? "open" : ""}`}>
+        <div className="gp-side-inner">
+          <div className="gp-side-top">
+            <Button className="gp-new" onClick={handleNewChat}><Plus /> New chat</Button>
+          </div>
+
+          <div className="gp-side-sec">
+            <div className="gp-sec-title">Pipeline</div>
+            <div className="gp-field">
+              <label htmlFor="pipeline" className="gp-label">Generation</label>
+              <select
+                id="pipeline"
+                value={pipeline}
+                onChange={(e)=>setPipeline(e.target.value)}
+                className="gp-select"
+              >
+                {PIPELINES.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+              </select>
+              <div className="gp-help">Choose the SQL-generation pipeline ("Basic" or "Premium").</div>
+            </div>
+          </div>
+
+          <div className="gp-side-sec">
+            <div className="gp-sec-title">Session</div>
+            <Button className="gp-danger" onClick={handleNewChat}><Trash /> Clear messages</Button>
+          </div>
+
+          <div className="gp-side-ft">v1 • SQL Chatbot</div>
+        </div>
+      </aside>
+
+      {/* Content */}
+      <div className="gp-content">
+        {/* Top Bar */}
+        <header className="gp-topbar">
+          <div className="gp-topbar-inner">
+            <IconButton className="gp-menu" onClick={()=>setSidebarOpen(s=>!s)}><Menu /></IconButton>
+            <div className="gp-logo"><DB /></div>
+            <div className="gp-title">
+              <div className="gp-title-main">SQL Chatbot</div>
+              <div className="gp-title-sub">{`Ask anything • ${pipeline}`}</div>
+            </div>
+          </div>
+        </header>
+
+        {/* Chat Body */}
+        <main className="gp-main">
+          <div className="gp-chat" ref={viewportRef}>
+            {messages.map((m) => (
+              <div key={m.id} className={`gp-msg ${m.role}`}>
+                <div className="gp-bubble">
+                  <div className="gp-role">{m.role === "user" ? "You" : "Assistant"}</div>
+                  <div className="gp-text">{m.text}</div>
+                  {m.role === "assistant" && (
+                    <AssistantAnswer sql={m.sql} explanation={m.explanation} error={m.error} />
+                  )}
+                </div>
+              </div>
+            ))}
+            {loading && (
+              <div className="gp-loading"><Loader /> Generating…</div>
+            )}
+          </div>
+
+          {showScrollBtn && (
+            <div className="gp-scroll" onClick={scrollToBottom}>
+              Jump to bottom
+            </div>
+          )}
+        </main>
+
+        {/* Composer fixed at bottom */}
+        <footer className="gp-footer">
+          <form onSubmit={handleAsk} className="gp-composer">
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={onKeyDown}
+              placeholder="Ask a data question… (e.g., Production by provider for September 2025)"
+              rows={1}
+              className="gp-input"
+            />
+            <Button disabled={loading || !input.trim()} onClick={handleAsk} className="gp-send">
+              {loading ? (<><Loader /> Sending</>) : (<><Send /> Ask</>)}
+            </Button>
+          </form>
+          <div className="gp-fineprint">
+            Your data never changes until you run the SQL yourself. Always review queries before executing.
+          </div>
+        </footer>
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 5, background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 12, padding: "12px 16px" }}>
-        {[0, 1, 2].map(i => (
-          <span key={i} style={{ width: 7, height: 7, borderRadius: "50%", background: "#94a3b8", display: "inline-block", animation: `bop 1.1s ${i * 0.16}s infinite ease-in-out` }} />
-        ))}
-      </div>
+
+      {/* Inline CSS (scoped) */}
+      <style>{`
+        :root{
+          --bg:#f6f7f9;           /* page background */
+          --panel:#fff;           /* cards & composer */
+          --muted:#64748b;        /* secondary text */
+          --line:#e5e7eb;         /* borders */
+          --ink:#0f172a;          /* primary text */
+          --ink-inv:#fff;         /* on dark */
+          --bubble-user:#0f172a;  /* user bubble */
+          --bubble-assist:#f1f5f9;/* assistant bubble */
+        }
+        *{box-sizing:border-box}
+        html,body,#root{height:100%}
+        body{margin:0; background:var(--bg); color:var(--ink); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";}
+
+        /* Shell with sidebar */
+        .gp-shell{min-height:100vh; display:grid; grid-template-columns: 280px 1fr;}
+        .gp-shell:not(.with-side){grid-template-columns:1fr}
+        .gp-content{display:flex; flex-direction:column; min-height:100vh}
+
+        .gp-side{background:#0b1220; color:#cbd5e1; border-right:1px solid #0f172a; display:none}
+        .gp-side.open{display:block}
+        .gp-side-inner{height:100vh; position:sticky; top:0; display:flex; flex-direction:column; padding:14px}
+        .gp-side-top{display:flex; gap:8px;}
+        .gp-new{width:100%; background:#111827; color:#e5e7eb; border-color:#1f2937}
+        .gp-side-sec{margin-top:16px; padding-top:12px; border-top:1px solid #1f2937}
+        .gp-sec-title{font-size:12px; color:#94a3b8; margin-bottom:10px; text-transform:uppercase; letter-spacing:.06em}
+        .gp-field{display:flex; flex-direction:column; gap:6px}
+        .gp-label{font-size:12px; color:#94a3b8}
+        .gp-select{border:1px solid #334155; background:#0f172a; color:#e5e7eb; border-radius:10px; padding:8px 10px}
+        .gp-help{font-size:12px; color:#94a3b8}
+        .gp-danger{background:#111827; color:#fecaca; border-color:#334155}
+        .gp-side-ft{margin-top:auto; font-size:12px; color:#94a3b8}
+
+        /* Top Bar */
+        .gp-topbar{position:sticky; top:0; z-index:10; background:rgba(255,255,255,0.86); backdrop-filter: blur(6px); border-bottom:1px solid var(--line)}
+        .gp-topbar-inner{max-width:900px; margin:0 auto; padding:12px 16px; display:flex; align-items:center; gap:10px}
+        .gp-menu{display:none}
+        .gp-logo{display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:9999px; background:var(--ink); color:var(--ink-inv)}
+        .gp-title-main{font-weight:600}
+        .gp-title-sub{font-size:12px; color:var(--muted)}
+
+        /* Chat Area */
+        .gp-main{flex:1;}
+        .gp-chat{max-width:900px; margin:0 auto; padding:16px; height:calc(100vh - 180px); overflow:auto}
+
+        .gp-msg{display:flex; gap:12px; margin:16px 0}
+        .gp-msg.user .gp-bubble{background:var(--bubble-user); color:var(--ink-inv)}
+        .gp-msg.assistant .gp-bubble{background:var(--bubble-assist); color:var(--ink)}
+        .gp-avatar{flex:0 0 28px; height:28px; display:flex; align-items:center; justify-content:center}
+        .gp-bubble{max-width:780px; padding:12px 14px; border-radius:16px; border:1px solid var(--line)}
+        .gp-role{font-size:12px; opacity:.7; margin-bottom:4px}
+        .gp-text{white-space:pre-wrap; line-height:1.5; font-size:14px}
+
+        .gp-assistant-details{margin-top:10px; display:flex; flex-direction:column; gap:10px}
+        .gp-card{border:1px solid var(--line); border-radius:12px; overflow:hidden; background:#fff}
+        .gp-card-h{display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 10px; font-size:12px; background:#f8fafc; border-bottom:1px solid var(--line)}
+        .gp-card-b{padding:12px}
+        .gp-code .gp-pre{margin:0; padding:12px; font-size:12px; overflow:auto}
+        .gp-expl{white-space:pre-wrap; line-height:1.55; font-size:14px}
+
+        .gp-error{color:#dc2626}
+        .gp-loading{color:var(--muted); font-size:14px; display:flex; align-items:center; gap:6px}
+
+        .gp-scroll{position:fixed; right:18px; bottom:110px; background:var(--ink); color:var(--ink-inv); padding:8px 12px; border-radius:999px; cursor:pointer; box-shadow:0 8px 24px rgba(0,0,0,.12); font-size:12px}
+
+        .gp-footer{position:sticky; bottom:0; backdrop-filter: blur(6px); background:rgba(246,247,249,0.7); border-top:1px solid var(--line)}
+        .gp-composer{max-width:900px; margin:10px auto 0; padding:0 16px 10px; display:flex; gap:8px}
+        .gp-input{flex:1; resize:none; min-height:52px; max-height:160px; padding:12px 12px; border:1px solid var(--line); border-radius:12px; outline:none; background:var(--panel); font-size:14px; line-height:1.45}
+        .gp-btn{display:inline-flex; align-items:center; gap:6px; padding:10px 14px; border-radius:12px; border:1px solid var(--line); background:#fff; cursor:pointer; font-size:14px}
+        .gp-btn[disabled]{opacity:.6; cursor:not-allowed}
+        .gp-icon-btn{display:inline-flex; align-items:center; justify-content:center; width:34px; height:34px; border-radius:12px; border:1px solid var(--line); background:#fff}
+        .gp-send{background:var(--ink); color:var(--ink-inv); border-color:var(--ink)}
+        .gp-fineprint{text-align:center; font-size:12px; color:var(--muted); padding:0 16px 14px}
+
+        @media (max-width: 1024px){
+          .gp-shell{grid-template-columns: 0 1fr}
+          .gp-side{position:fixed; left:0; top:0; width:280px; height:100vh; display:block; transform:translateX(-100%); transition:transform .2s ease;}
+          .gp-side.open{transform:translateX(0)}
+          .gp-menu{display:inline-flex}
+        }
+
+        @media (max-width: 640px){
+          .gp-chat{height:calc(100vh - 190px)}
+          .gp-bubble{max-width:100%}
+        }
+      `}</style>
     </div>
   );
 }
-
-/* ── Main ── */
-export default function SqlChatbot() {
-  const [messages, setMessages] = useState([{
-    id: "seed", role: "assistant",
-    text: "Hello! I'm your SQL assistant. Describe what data you need in plain English and I'll write the MySQL query for you.",
-    createdAt: Date.now(),
-  }]);
-  const [input, setInput]       = useState("");
-  const [loading, setLoading]   = useState(false);
-  const [pipeline, setPipeline] = useState(PIPELINES[0].id);
-  const [open, setOpen]         = useState(true);
-  const chatRef = useRef(null);
-  const taRef   = useRef(null);
-
-  useEffect(() => {
-    chatRef.current?.scrollTo({ top: chatRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages, loading]);
-
-  useEffect(() => {
-    const ta = taRef.current; if (!ta) return;
-    ta.style.height = "auto";
-    ta.style.height = Math.min(ta.scrollHeight, 150) + "px";
-  }, [input]);
-
-  async function handleAsk() {
-    const q = input.trim(); if (!q || loading) return;
-    setMessages(m => [...m, { id: crypto.randomUUID(), role: "user", text: q, createdAt: Date.now() }]);
-    setInput(""); setLoading(true);
-    try {
-      const { sql, explanation } = await callGenerateSqlAPI(q, pipeline);
-      setMessages(m => [...m, { id: crypto.randomUUID(), role: "assistant", text: `Query generated with the ${pipeline === "cluster" ? "Premium" : "Basic"} pipeline.`, sql, explanation, createdAt: Date.now() }]);
-    } catch (err) {
-      setMessages(m => [...m, { id: crypto.randomUUID(), role: "assistant", text: "Could not generate a query.", explanation: String(err?.message || err), error: true, createdAt: Date.now() }]);
-    } finally { setLoading(false); taRef.current?.focus(); }
-  }
-
-  function resetChat() {
-    setMessages([{ id: "seed", role: "assistant", text: "Hello! I'm your SQL assistant. Describe what data you need in plain English and I'll write the MySQL query for you.", createdAt: Date.now() }]);
-    setInput("");
-  }
-
-  const examples = [
-    "Total production by provider for Sep 2025",
-    "New patients scheduled on 2025-10-13",
-    "Top 10 procedures by revenue this year",
-  ];
-
-  const canSend = !loading && input.trim().length > 0;
-
-  return (
-    <>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap');
-        *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
-        html,body,#root{height:100%;}
-        body{font-family:'Inter',system-ui,sans-serif;background:#f0f4ff;color:#1e293b;}
-        textarea{font-family:'Inter',system-ui,sans-serif;}
-        button{font-family:'Inter',system-ui,sans-serif;}
-        @keyframes spin{to{transform:rotate(360deg);}}
-        @keyframes bop{0%,60%,100%{transform:translateY(0);opacity:.4;}30%{transform:translateY(-5px);opacity:1;}}
-        @keyframes up{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:translateY(0);}}
-        .msg-in{animation:up .22s ease both;}
-        .sb-label-fade{transition:opacity .2s ease,max-width .28s cubic-bezier(.4,0,.2,1);}
-        .sb-label-fade.hide{max-width:0!important;opacity:0;overflow:hidden;}
-        .grp-lbl-fade{transition:opacity .18s ease,max-height .28s ease,padding .28s ease;}
-        .grp-lbl-fade.hide{max-height:0!important;opacity:0!important;padding-top:0!important;padding-bottom:0!important;overflow:hidden;pointer-events:none;}
-        .tick-fade{transition:opacity .15s;}
-        .tick-fade.hide{opacity:0;width:0;overflow:hidden;}
-        ::-webkit-scrollbar{width:5px;height:5px;}
-        ::-webkit-scrollbar-track{background:transparent;}
-        ::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:99px;}
-      `}</style>
-
-      <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: "#f0f4ff" }}>
-
-        {/* ══════════════ SIDEBAR ══════════════ */}
-        <aside style={{
-          width: open ? 260 : 60,
-          transition: "width .28s cubic-bezier(.4,0,.2,1)",
-          flexShrink: 0,
-          display: "flex",
-          flexDirection: "column",
-          height: "100vh",
-          background: "#ffffff",
-          borderRight: "1px solid #e2e8f0",
-          padding: "12px 10px",
-          gap: 3,
-          overflow: "hidden",
-          boxShadow: "2px 0 12px rgba(99,102,241,0.07)",
-        }}>
-
-          {/* Header */}
-          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "4px 2px 14px", borderBottom: "1px solid #f1f5f9", marginBottom: 6, flexShrink: 0 }}>
-            {/* Toggle button — full contrast, always visible */}
-            <button
-              onClick={() => setOpen(v => !v)}
-              title={open ? "Collapse sidebar" : "Expand sidebar"}
-              style={{
-                width: 38, height: 38, flexShrink: 0,
-                display: "flex", alignItems: "center", justifyContent: "center",
-                background: "#6366f1",
-                border: "none",
-                borderRadius: 10,
-                color: "#ffffff",
-                cursor: "pointer",
-                boxShadow: "0 2px 8px rgba(99,102,241,0.4)",
-                transition: "background .15s, box-shadow .15s, transform .1s",
-              }}
-              onMouseEnter={e => { e.currentTarget.style.background = "#4f46e5"; e.currentTarget.style.transform = "scale(1.05)"; }}
-              onMouseLeave={e => { e.currentTarget.style.background = "#6366f1"; e.currentTarget.style.transform = "scale(1)"; }}
-            >
-              <MenuIcon />
-            </button>
-            <span className="sb-label-fade" style={{ maxWidth: 160, fontWeight: 700, fontSize: 15, color: "#1e293b", whiteSpace: "nowrap", letterSpacing: "-.02em" }}
-              {...(!open ? { className: "sb-label-fade hide" } : {})}>
-              QueryAI
-            </span>
-          </div>
-
-          {/* New chat */}
-          <button
-            onClick={resetChat}
-            title="New chat"
-            style={{
-              display: "flex", alignItems: "center", gap: 9,
-              width: "100%", height: 40, padding: "0 10px",
-              borderRadius: 10,
-              border: "1.5px solid #6366f1",
-              background: "#eef2ff",
-              color: "#6366f1",
-              fontSize: 13, fontWeight: 600,
-              cursor: "pointer", flexShrink: 0, overflow: "hidden",
-              transition: "background .14s, border-color .14s",
-              marginBottom: 4,
-            }}
-            onMouseEnter={e => { e.currentTarget.style.background = "#e0e7ff"; }}
-            onMouseLeave={e => { e.currentTarget.style.background = "#eef2ff"; }}
-          >
-            <span style={{ display: "flex", flexShrink: 0 }}><PlusIcon /></span>
-            <span className={`sb-label-fade${!open ? " hide" : ""}`} style={{ maxWidth: 160, whiteSpace: "nowrap" }}>New chat</span>
-          </button>
-
-          {/* Sep */}
-          <div style={{ height: 1, background: "#f1f5f9", margin: "6px 2px", flexShrink: 0 }} />
-
-          {/* Pipeline */}
-          <div className={`grp-lbl-fade${!open ? " hide" : ""}`} style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "#94a3b8", padding: "6px 11px 4px", maxHeight: 34, flexShrink: 0 }}>
-            Pipeline
-          </div>
-          {PIPELINES.map(p => {
-            const isActive = pipeline === p.id;
-            return (
-              <button
-                key={p.id}
-                onClick={() => setPipeline(p.id)}
-                title={p.label}
-                style={{
-                  display: "flex", alignItems: "center", gap: 10,
-                  width: "100%", height: 38, padding: "0 10px",
-                  borderRadius: 9,
-                  border: isActive ? "1.5px solid #c7d2fe" : "1.5px solid transparent",
-                  background: isActive ? "#eef2ff" : "transparent",
-                  color: isActive ? "#4f46e5" : "#64748b",
-                  fontSize: 13, fontWeight: isActive ? 600 : 500,
-                  cursor: "pointer", flexShrink: 0, overflow: "hidden",
-                  transition: "all .13s",
-                }}
-                onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = "#f8fafc"; e.currentTarget.style.color = "#334155"; } }}
-                onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "#64748b"; } }}
-              >
-                <span style={{
-                  width: 9, height: 9, borderRadius: "50%", flexShrink: 0,
-                  background: isActive ? "#6366f1" : "#cbd5e1",
-                  boxShadow: isActive ? "0 0 7px rgba(99,102,241,0.65)" : "none",
-                  transition: "background .2s, box-shadow .2s",
-                }} />
-                <span className={`sb-label-fade${!open ? " hide" : ""}`} style={{ flex: 1, maxWidth: 140, whiteSpace: "nowrap", textAlign: "left" }}>{p.label}</span>
-                <span className={`tick-fade${!open ? " hide" : ""}`} style={{ color: "#6366f1", display: "flex", flexShrink: 0, opacity: isActive ? 1 : 0, width: isActive ? "auto" : 0, overflow: "hidden" }}>
-                  {isActive && <CheckIcon />}
-                </span>
-              </button>
-            );
-          })}
-
-          {/* Sep */}
-          <div style={{ height: 1, background: "#f1f5f9", margin: "6px 2px", flexShrink: 0 }} />
-
-          {/* Examples */}
-          <div className={`grp-lbl-fade${!open ? " hide" : ""}`} style={{ fontSize: 10, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "#94a3b8", padding: "6px 11px 4px", maxHeight: 34, flexShrink: 0 }}>
-            Examples
-          </div>
-          {examples.map((ex, i) => (
-            <button
-              key={i}
-              onClick={() => { setInput(ex); taRef.current?.focus(); }}
-              title={ex}
-              style={{
-                display: "flex", alignItems: "center", gap: 9,
-                width: "100%", height: 36, padding: "0 10px",
-                borderRadius: 8, border: "none",
-                background: "transparent",
-                color: "#64748b",
-                fontSize: 12, fontWeight: 500,
-                cursor: "pointer", flexShrink: 0, overflow: "hidden",
-                textAlign: "left", transition: "background .13s, color .13s",
-              }}
-              onMouseEnter={e => { e.currentTarget.style.background = "#f8fafc"; e.currentTarget.style.color = "#334155"; }}
-              onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "#64748b"; }}
-            >
-              <span style={{ color: "#cbd5e1", display: "flex", flexShrink: 0 }}><ChevronIcon /></span>
-              <span className={`sb-label-fade${!open ? " hide" : ""}`} style={{ maxWidth: 160, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{ex}</span>
-            </button>
-          ))}
-
-          {/* Footer */}
-          <div style={{ marginTop: "auto", flexShrink: 0 }}>
-            <div style={{ height: 1, background: "#f1f5f9", margin: "8px 2px 8px" }} />
-            <button
-              onClick={resetChat}
-              title="Clear session"
-              style={{
-                display: "flex", alignItems: "center", gap: 9,
-                width: "100%", height: 36, padding: "0 10px",
-                borderRadius: 8, border: "none",
-                background: "transparent", color: "#94a3b8",
-                fontSize: 13, cursor: "pointer", flexShrink: 0,
-                overflow: "hidden", transition: "background .13s, color .13s",
-              }}
-              onMouseEnter={e => { e.currentTarget.style.background = "#fff1f2"; e.currentTarget.style.color = "#ef4444"; }}
-              onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "#94a3b8"; }}
-            >
-              <span style={{ display: "flex", flexShrink: 0 }}><TrashIcon /></span>
-              <span className={`sb-label-fade${!open ? " hide" : ""}`} style={{ maxWidth: 160, whiteSpace: "nowrap" }}>Clear session</span>
-            </button>
-          </div>
-        </aside>
-
-        {/* ══════════════ MAIN ══════════════ */}
-        <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0, height: "100vh", overflow: "hidden" }}>
-
-          {/* Topbar */}
-          <header style={{
-            display: "flex", alignItems: "center", justifyContent: "space-between",
-            padding: "0 24px", height: 58, flexShrink: 0,
-            background: "#ffffff",
-            borderBottom: "1px solid #e2e8f0",
-            boxShadow: "0 1px 4px rgba(99,102,241,0.06)",
-          }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <span style={{ fontSize: 16, fontWeight: 700, color: "#1e293b", letterSpacing: "-.025em" }}>SQL Assistant</span>
-              <span style={{
-                fontSize: 10, fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase",
-                padding: "3px 11px", borderRadius: 999,
-                background: "#eef2ff", color: "#6366f1",
-                border: "1.5px solid #c7d2fe",
-              }}>
-                {pipeline === "cluster" ? "Premium" : "Basic"}
-              </span>
-            </div>
-            <span style={{
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: 11, color: "#94a3b8",
-              background: "#f8fafc", border: "1px solid #e2e8f0",
-              padding: "4px 13px", borderRadius: 999,
-            }}>MySQL</span>
-          </header>
-
-          {/* Chat */}
-          <div ref={chatRef} style={{ flex: 1, overflowY: "auto", padding: "32px 24px", background: "#f0f4ff" }}>
-            <div style={{ maxWidth: 800, margin: "0 auto", display: "flex", flexDirection: "column", gap: 28 }}>
-              {messages.map((m, i) => (
-                <div key={m.id} className="msg-in" style={{ display: "flex", alignItems: "flex-start", gap: 13, flexDirection: m.role === "user" ? "row-reverse" : "row", animationDelay: `${i * 0.02}s` }}>
-                  {/* Avatar */}
-                  <div style={{
-                    width: 34, height: 34, borderRadius: 10, flexShrink: 0, marginTop: 1,
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    background: m.role === "assistant" ? "linear-gradient(135deg,#eff6ff,#dbeafe)" : "linear-gradient(135deg,#f5f3ff,#ede9fe)",
-                    border: m.role === "assistant" ? "1.5px solid #bfdbfe" : "1.5px solid #ddd6fe",
-                    color: m.role === "assistant" ? "#3b82f6" : "#7c3aed",
-                    boxShadow: m.role === "assistant" ? "0 2px 8px rgba(59,130,246,0.15)" : "0 2px 8px rgba(124,58,237,0.15)",
-                  }}>
-                    {m.role === "assistant" ? <DBIcon /> : <UserIcon />}
-                  </div>
-
-                  {/* Bubble */}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5, flexDirection: m.role === "user" ? "row-reverse" : "row" }}>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: m.role === "assistant" ? "#3b82f6" : "#7c3aed" }}>
-                        {m.role === "user" ? "You" : "QueryAI"}
-                      </span>
-                      <span style={{ fontSize: 11, color: "#cbd5e1" }}>
-                        {new Date(m.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                      </span>
-                    </div>
-                    <div style={{
-                      display: "inline-block",
-                      fontSize: 14, lineHeight: 1.7,
-                      padding: "13px 17px",
-                      borderRadius: m.role === "user" ? "16px 16px 4px 16px" : "16px 16px 16px 4px",
-                      whiteSpace: "pre-wrap", maxWidth: "100%",
-                      ...(m.role === "assistant" ? {
-                        background: "#ffffff",
-                        border: "1px solid #e2e8f0",
-                        color: "#334155",
-                        boxShadow: "0 2px 8px rgba(99,102,241,0.06)",
-                      } : {
-                        background: "linear-gradient(135deg,#6366f1,#4f46e5)",
-                        border: "none",
-                        color: "#fff",
-                        boxShadow: "0 4px 16px rgba(99,102,241,0.38)",
-                      }),
-                    }}>
-                      {m.text}
-                    </div>
-                    {m.role === "assistant" && <AssistantAnswer sql={m.sql} explanation={m.explanation} error={m.error} />}
-                  </div>
-                </div>
-              ))}
-              {loading && <TypingDots />}
-            </div>
-          </div>
-
-          {/* Composer */}
-          <div style={{
-            flexShrink: 0, padding: "14px 24px 12px",
-            background: "#ffffff",
-            borderTop: "1px solid #e2e8f0",
-            boxShadow: "0 -2px 12px rgba(99,102,241,0.05)",
-          }}>
-            <div style={{
-              maxWidth: 800, margin: "0 auto",
-              display: "flex", alignItems: "flex-end", gap: 10,
-              background: "#f8faff",
-              border: "1.5px solid #c7d2fe",
-              borderRadius: 18,
-              padding: "11px 11px 11px 18px",
-              boxShadow: "0 2px 12px rgba(99,102,241,0.08)",
-              transition: "border-color .2s, box-shadow .2s",
-            }}
-              onFocus={e => { e.currentTarget.style.borderColor = "#6366f1"; e.currentTarget.style.boxShadow = "0 0 0 4px rgba(99,102,241,0.12)"; }}
-              onBlur={e => { e.currentTarget.style.borderColor = "#c7d2fe"; e.currentTarget.style.boxShadow = "0 2px 12px rgba(99,102,241,0.08)"; }}
-            >
-              <textarea
-                ref={taRef}
-                value={input}
-                onChange={e => setInput(e.target.value)}
-                onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleAsk(); } }}
-                placeholder="Ask in plain English… e.g. 'Revenue by department last quarter'"
-                rows={1}
-                style={{
-                  flex: 1, background: "transparent", border: "none", outline: "none",
-                  resize: "none", fontSize: 14, lineHeight: 1.55, color: "#1e293b",
-                  minHeight: 26, maxHeight: 150, overflowY: "auto", padding: 0,
-                  fontFamily: "inherit",
-                }}
-                onInput={e => {
-                  e.target.style.height = "auto";
-                  e.target.style.height = Math.min(e.target.scrollHeight, 150) + "px";
-                }}
-              />
-              {/* Send button — always maximum visibility */}
-              <button
-                onClick={handleAsk}
-                disabled={!canSend}
-                title="Send"
-                style={{
-                  width: 44, height: 44, flexShrink: 0,
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  borderRadius: 13, border: "none", cursor: canSend ? "pointer" : "not-allowed",
-                  background: canSend ? "linear-gradient(135deg,#6366f1,#4f46e5)" : "#e2e8f0",
-                  color: canSend ? "#ffffff" : "#94a3b8",
-                  boxShadow: canSend ? "0 4px 14px rgba(99,102,241,0.5)" : "none",
-                  transition: "all .15s",
-                  transform: "scale(1)",
-                }}
-                onMouseEnter={e => { if (canSend) { e.currentTarget.style.transform = "scale(1.08)"; e.currentTarget.style.boxShadow = "0 6px 20px rgba(99,102,241,0.65)"; } }}
-                onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.boxShadow = canSend ? "0 4px 14px rgba(99,102,241,0.5)" : "none"; }}
-              >
-                {loading ? <SpinIcon /> : <SendIcon />}
-              </button>
-            </div>
-            <p style={{ maxWidth: 800, margin: "9px auto 0", textAlign: "center", fontSize: 11, color: "#cbd5e1" }}>
-              Always review generated queries before running them on production data.
-            </p>
-          </div>
-        </div>
-      </div>
-    </>
-  );
-}
-
-
