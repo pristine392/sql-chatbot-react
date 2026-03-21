@@ -36,14 +36,9 @@ async function callGenerateSqlAPI(question, pipelineId) {
 
   const payload = {
     question,
-    mode: pipelineId,                 // <-- critical fix
-    schema_path: "schema_tree.json",  // keep if your backend uses these
-    keywords_path: "keyword_to_tables.json",
+    mode: pipelineId,
     dialect: "mysql",
-
-    // If you later add a real LLM selector, send it as `openai_model`, e.g.:
-    // openai_model: "gpt-4o-mini",
-  };
+};
 
   const res = await fetch(apiUrl, {
     method: "POST",
