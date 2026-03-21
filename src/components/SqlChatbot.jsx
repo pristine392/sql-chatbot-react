@@ -11,17 +11,12 @@ const Menu = (p) => <span {...p}>☰</span>;
 const Plus = (p) => <span {...p}>＋</span>;
 const Trash = (p) => <span {...p}>🗑️</span>;
 
-/* ---------------- API endpoints (by pipeline) ----------------
-   NOTE: Keep ports consistent with your server.
-   keyword -> /generate_sql
-   cluster -> /generate_sql_premium
----------------------------------------------------------------- */
-const ENDPOINTS = {
-  // keyword: "http://localhost:9001/generate_sql",
-  // cluster: "http://localhost:9001/generate_sql_premium",
+/* ---------------- API endpoints ---------------- */
+const API_BASE = "https://sql-chatbot-pythonapi.vercel.app/api";
 
-  keyword: "https://generate-sql.local/generate_sql",
-  cluster: "https://generate-sql.local/generate_sql_premium",
+const ENDPOINTS = {
+  keyword: `${API_BASE}/generate_sql`,
+  cluster: `${API_BASE}/generate_sql_premium`,
 };
 
 /* ---------------- Pipelines dropdown ---------------- */
